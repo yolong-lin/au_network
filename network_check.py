@@ -1,12 +1,33 @@
+# Ignore warnings
 import warnings
-import colorama
-import requests
-from bs4 import BeautifulSoup
-import pandas as pd
-import socket
+warnings.filterwarnings("ignore")
+
+# Init console
+import sys
+from rich.prompt import Prompt
+from rich.console import Console
+from rich.table import Table
+from rich import box
+console = Console()
+error_console = Console(file=sys.stderr)
+console.clear()
+
+# Get account and password
+from dotenv import load_dotenv, find_dotenv
 import os
+if not find_dotenv():
+    student_id = Prompt.ask("Student ID")
+    password   = Prompt.ask("Password", password = True)
+else:
+    load_dotenv()
+    student_id = os.getenv('student_id')
+    password   = os.getenv('password')
+    if not student_id or not password:
+        error_console.print("Cannot find [u]student_id[/] or [u]password[/] in .env file!!", style='bright_red')
+        exit(1)
 
 # Get Host IP
+import socket
 def get_host_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -16,43 +37,69 @@ def get_host_ip():
         s.close()
     return ip
 
-warnings.filterwarnings("ignore")
-colorama.init(autoreset=True)
+host_ip = get_host_ip()
 
-student_id = input('StudentID: ')
-password   = input('Password : ')
+# Crawl Needed
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
 
-while True:
-    os.system("cls")
+console.show_cursor(False)
+def fetch_traffic():
+    console.clear()
+    console.print()
 
-    res = requests.post("https://nsp.asia.edu.tw/register/activate.php", data= {
+    res = requests.post("https://nsp.asia.edu.tw/register/activate.php", verify= False, data= {
         "action": "register",
         "zh_tw": 1,
         "student_id": student_id,
         "mpwd": password,
-    }, verify= False)
+    })
     soup = BeautifulSoup(res.text, 'lxml')
 
-    tables = pd.read_html(str(soup))
-    df = tables[1]
-    df = df[df[1] == get_host_ip()]
+    dfs = pd.read_html(str(soup))
+    df = dfs[1]
+    df = df[df[1] == host_ip]
     df.reset_index(drop=True, inplace = True)
-    print("流入量:   " + df.loc[0,3] + "\t\t流出量:   " + df.loc[0,4])
-    print("日流入量: " + df.loc[0,6] + "\t\t日流出量: " + df.loc[0,7])
-    print("預用量:   " + df.loc[0,8] + "\t\t日總量:   " + df.loc[0,9])
 
-    total_traffic = int(df.loc[0,5][:-1])
-    if total_traffic < 2000:
-        print("總量:     " + colorama.Fore.GREEN + df.loc[0,5])
-    elif total_traffic < 3000:
-        print("總量:     " + colorama.Fore.YELLOW + df.loc[0,5])
-    elif total_traffic < 4000:
-        print("總量:     " + colorama.Fore.MAGENTA + df.loc[0,5])
-    else:
-        print("總量:     " + colorama.Fore.RED + df.loc[0,5])
+    location          = df.loc[0,0]
+    mac               = df.loc[0,2]
+    traffic_status    = df.loc[0,10]
 
-    print(df.loc[0,10])
+    traffic_data = {
+        "traffic_in"        : df.loc[0,3],
+        "traffic_out"       : df.loc[0,4],
+        "preuse_traffic"    : df.loc[0,8],
+        "day_traffic_in"    : df.loc[0,6],
+        "day_traffic_out"   : df.loc[0,7],
+        "day_traffic_total" : df.loc[0,9],
+        "traffic_total"     : df.loc[0,5],
+    }
 
-    not_exit = input("")
-    if not_exit:
-        break
+    table = Table(header_style="bold magenta")
+    table.title = "[#ff9100]%s[/] | [#ff9100]%s[/] | [#ff9100]%s[/]" % (location, host_ip, mac)
+    table.caption = ":sunglasses: %s :sunglasses:" % (traffic_status)
+    table.box = box.SQUARE
+    table.add_column("流入量", justify="right")
+    table.add_column("流出量", justify="right")
+    table.add_column("預用量", justify="right")
+    table.add_column("日流入量", justify="right")
+    table.add_column("日流出量", justify="right")
+    table.add_column("日總量", justify="right")
+    table.add_column("總量", justify="right")
+
+    table.add_row(
+        *traffic_data.values()
+    )
+    
+    console.print(table, justify="center")
+
+
+while True:
+    try:
+        fetch_traffic()
+        kb = Prompt.get_input(console, '', password=True)
+    except KeyboardInterrupt:
+        console.show_cursor(True)
+        exit(0)
+
